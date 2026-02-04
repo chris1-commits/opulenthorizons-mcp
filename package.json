@@ -1,0 +1,57 @@
+{
+  "name": "leadchain-mcp",
+  "version": "1.0.0",
+  "description": "LeadChain MCP Server - Meta Lead Ads to Zoho CRM pipeline with Claude integration",
+  "type": "module",
+  "main": "leadchain-mcp-server.js",
+  "scripts": {
+    "start": "node leadchain-mcp-server.js",
+    "start:webhook": "node webhook-handler.js",
+    "start:worker": "node sync-worker.js",
+    "start:worker:once": "node sync-worker.js --once",
+    "start:worker:dry": "node sync-worker.js --dry-run",
+    "dev": "node --watch leadchain-mcp-server.js",
+    "dev:webhook": "node --watch webhook-handler.js",
+    "dev:worker": "node --watch sync-worker.js",
+    "db:init": "psql $DATABASE_URL -f schema.sql",
+    "db:reset": "psql $DATABASE_URL -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && npm run db:init",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:build": "docker compose build",
+    "test": "node --test",
+    "lint": "eslint .",
+    "deploy": "./deploy.sh"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "meta",
+    "facebook",
+    "instagram",
+    "lead-ads",
+    "zoho",
+    "crm",
+    "webhook",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chris1-commits/opulenthorizons-mcp.git"
+  }
+}

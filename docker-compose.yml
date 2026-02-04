@@ -1,0 +1,148 @@
+# LeadChain MCP - Docker Compose Configuration
+# Meta Lead Ads → Postgres → Zoho CRM Pipeline
+
+services:
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: leadchain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-leadchain_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leadchain_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-leadchain_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-leadchain_user} -d ${POSTGRES_DB:-leadchain_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - leadchain
+
+  # ============================================================================
+  # Redis (for future rate limiting, caching, job queues)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: leadchain-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - leadchain
+
+  # ============================================================================
+  # Webhook Handler (receives Meta Lead Ads webhooks)
+  # ============================================================================
+  webhook-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: webhook
+    container_name: leadchain-webhook
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadchain_user}:${POSTGRES_PASSWORD:-leadchain_secret}@postgres:5432/${POSTGRES_DB:-leadchain_db}
+      META_APP_SECRET: ${META_APP_SECRET}
+      META_ACCESS_TOKEN: ${META_ACCESS_TOKEN}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-leadchain_verify_token}
+    ports:
+      - "${WEBHOOK_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - leadchain
+
+  # ============================================================================
+  # Sync Worker (syncs leads to Zoho CRM)
+  # ============================================================================
+  sync-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: sync-worker
+    container_name: leadchain-sync-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadchain_user}:${POSTGRES_PASSWORD:-leadchain_secret}@postgres:5432/${POSTGRES_DB:-leadchain_db}
+      ZOHO_CLIENT_ID: ${ZOHO_CLIENT_ID}
+      ZOHO_CLIENT_SECRET: ${ZOHO_CLIENT_SECRET}
+      ZOHO_REFRESH_TOKEN: ${ZOHO_REFRESH_TOKEN}
+      ZOHO_API_DOMAIN: ${ZOHO_API_DOMAIN:-https://www.zohoapis.com}
+      ZOHO_ACCOUNTS_DOMAIN: ${ZOHO_ACCOUNTS_DOMAIN:-https://accounts.zoho.com}
+      SYNC_INTERVAL_MS: ${SYNC_INTERVAL_MS:-300000}
+      SYNC_BATCH_SIZE: ${SYNC_BATCH_SIZE:-50}
+      SYNC_MAX_RETRIES: ${SYNC_MAX_RETRIES:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - leadchain
+
+  # ============================================================================
+  # MCP Server (for Claude integration)
+  # ============================================================================
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mcp-server
+    container_name: leadchain-mcp
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadchain_user}:${POSTGRES_PASSWORD:-leadchain_secret}@postgres:5432/${POSTGRES_DB:-leadchain_db}
+      ZOHO_CLIENT_ID: ${ZOHO_CLIENT_ID}
+      ZOHO_CLIENT_SECRET: ${ZOHO_CLIENT_SECRET}
+      ZOHO_REFRESH_TOKEN: ${ZOHO_REFRESH_TOKEN}
+      ZOHO_API_DOMAIN: ${ZOHO_API_DOMAIN:-https://www.zohoapis.com}
+      ZOHO_ACCOUNTS_DOMAIN: ${ZOHO_ACCOUNTS_DOMAIN:-https://accounts.zoho.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # MCP server uses stdio, not HTTP ports
+    # Connect via: docker exec -it leadchain-mcp node leadchain-mcp-server.js
+    stdin_open: true
+    tty: true
+    networks:
+      - leadchain
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  leadchain:
+    driver: bridge
